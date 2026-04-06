@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import re
 import sys
 import time
 from datetime import time as dt_time
@@ -61,6 +62,107 @@ def _register_user(db: Database, settings: Settings, telegram_chat_id: int) -> i
     return user_id
 
 
+def _feeds_panel_html(urls: list[str]) -> str:
+    if not urls:
+        return (
+            "<b>Your feeds</b>\n\n"
+            "No feeds yet. Use <b>/explore</b> or <code>/addfeed &lt;url&gt;</code>."
+        )
+    lines = "\n".join(
+        f"{i + 1}. <code>{html.escape(u)}</code>" for i, u in enumerate(urls)
+    )
+    return (
+        f"<b>Your feeds</b> ({len(urls)})\n\n"
+        f"{lines}\n\n"
+        "<i>Open in the browser or remove without copying the URL.</i>"
+    )
+
+
+def _feeds_keyboard(urls: list[str]) -> InlineKeyboardMarkup | None:
+    if not urls:
+        return None
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, u in enumerate(urls):
+        rows.append(
+            [
+                InlineKeyboardButton("🔗 Open", url=u),
+                InlineKeyboardButton("🗑 Remove", callback_data=f"frm_{i}"),
+            ]
+        )
+    return InlineKeyboardMarkup(rows)
+
+
+def _keywords_panel_html(labels: list[str]) -> str:
+    if not labels:
+        lines = "You have no keywords yet."
+    else:
+        lines = "\n".join(
+            f"{i + 1}. {html.escape(l, quote=False)}" for i, l in enumerate(labels)
+        )
+    return (
+        "<b>🔔 Keywords</b>\n\n"
+        "When a new item matches a keyword, you get a <b>Keyword alert</b> "
+        "instead of the usual notification.\n\n"
+        f"{lines}\n\n"
+        "<code>/keywords add &lt;phrase&gt;</code>\n"
+        "<code>/keywords remove &lt;phrase&gt;</code>\n"
+        "<code>/keywords clear</code>"
+    )
+
+
+def _keywords_keyboard(labels: list[str]) -> InlineKeyboardMarkup | None:
+    if not labels:
+        return None
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, lab in enumerate(labels):
+        btn = lab.replace("\n", " ")
+        if len(btn) > 40:
+            btn = btn[:37] + "…"
+        rows.append([InlineKeyboardButton(f"🗑 {btn}", callback_data=f"kwm_{i}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _digest_panel_html(uid: int, db: Database, settings: Settings) -> str:
+    on = db.get_digest_enabled(uid)
+    return (
+        "<b>📋 Daily digest</b>\n\n"
+        f"Status: <b>{'on' if on else 'off'}</b>\n"
+        "When on, new items are queued and sent once per day around "
+        f"{settings.digest_time_hour:02d}:{settings.digest_time_minute:02d} "
+        f"{html.escape(settings.digest_timezone)}.\n\n"
+        "Use the buttons below or <code>/digest on</code> / <code>/digest off</code>."
+    )
+
+
+def _digest_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✅ Digest on", callback_data="dig_on"),
+                InlineKeyboardButton("⏹ Digest off", callback_data="dig_off"),
+            ]
+        ]
+    )
+
+
+def _help_text(settings: Settings) -> str:
+    return (
+        "<b>❓ Help — RSS News Bot</b>\n\n"
+        "<b>Feeds</b>\n"
+        "• /feeds — list with Open / Remove\n"
+        "• /explore — add by category\n"
+        "• /addfeed &lt;url&gt; · /removefeed &lt;url&gt;\n"
+        "• /testfeed &lt;url&gt; — preview without saving\n\n"
+        "<b>Alerts</b>\n"
+        "• /keywords — keyword alerts when text matches\n"
+        "• /digest — daily bundle (polling unchanged)\n\n"
+        "<b>Misc</b>\n"
+        "• /test · /testdigest — previews\n\n"
+        f"<i>Digest time: {settings.digest_time_hour:02d}:{settings.digest_time_minute:02d} "
+        f"{html.escape(settings.digest_timezone)}</i>"
+    )
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_chat is None or update.message is None:
         return
@@ -69,19 +171,41 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     uid = _register_user(db, settings, chat_id)
     digest_on = db.get_digest_enabled(uid)
-    digest_note = (
-        f"\nYour digest is <b>{'on' if digest_on else 'off'}</b> "
-        f"(scheduled around {settings.digest_time_hour:02d}:{settings.digest_time_minute:02d} "
-        f"{html.escape(settings.digest_timezone)} when on). "
-        "Use /digest on or /digest off.\n"
+    n_feeds = len(db.get_feed_urls(uid))
+    n_kw = len(db.list_keyword_labels(uid))
+
+    menu_kb = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("📰 Feeds", callback_data="menu_feeds"),
+                InlineKeyboardButton("🔎 Explore", callback_data="menu_explore"),
+            ],
+            [
+                InlineKeyboardButton("🔔 Keywords", callback_data="menu_keywords"),
+                InlineKeyboardButton("📋 Digest", callback_data="menu_digest"),
+            ],
+            [InlineKeyboardButton("❓ Help", callback_data="menu_help")],
+        ]
     )
     await update.message.reply_text(
-        "RSS bot is running. Your chat id is:\n"
-        f"<code>{chat_id}</code>\n\n"
-        "Feeds default from RSS_FEED_URLS until you add your own.\n"
-        f"{digest_note}"
-        "Commands: /feeds, /explore, /addfeed &lt;url&gt;, /testfeed &lt;url&gt;, /removefeed, "
-        "/keywords, /digest, /test, /testdigest",
+        "<b>RSS News Bot</b>\n\n"
+        f"Chat <code>{chat_id}</code>\n"
+        f"Feeds: <b>{n_feeds}</b> · Digest: <b>{'on' if digest_on else 'off'}</b> · "
+        f"Keywords: <b>{n_kw}</b>\n\n"
+        "Defaults come from <code>RSS_FEED_URLS</code> until you add your own feeds.\n"
+        "Use the buttons below or type /help for every command.",
+        reply_markup=menu_kb,
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_chat is None or update.message is None:
+        return
+    settings: Settings = context.application.bot_data["settings"]
+    _register_user(context.application.bot_data["db"], settings, update.effective_chat.id)
+    await update.message.reply_text(
+        _help_text(settings),
         parse_mode=ParseMode.HTML,
     )
 
@@ -258,15 +382,13 @@ async def cmd_feeds(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings: Settings = context.application.bot_data["settings"]
     uid = _register_user(db, settings, update.effective_chat.id)
     urls = db.get_feed_urls(uid)
-    if not urls:
-        await update.message.reply_text(
-            "No feeds yet. Try <b>/explore</b> for categories or use "
-            "<code>/addfeed &lt;url&gt;</code>.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-    lines = "\n".join(f"• {u}" for u in urls)
-    await update.message.reply_text(f"Your feeds ({len(urls)}):\n{lines}")
+    text = _feeds_panel_html(urls)
+    kb = _feeds_keyboard(urls)
+    await update.message.reply_text(
+        text,
+        reply_markup=kb,
+        parse_mode=ParseMode.HTML,
+    )
 
 
 async def cmd_addfeed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -465,18 +587,9 @@ async def cmd_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     args = context.args or []
     if not args:
         labels = db.list_keyword_labels(uid)
-        if not labels:
-            lines = "You have no keywords yet."
-        else:
-            lines = "\n".join(f"• {html.escape(l, quote=False)}" for l in labels)
         await update.message.reply_text(
-            "<b>Keywords</b> — when a new item from your feeds matches, you get a "
-            "<b>🔔 Keyword alert</b> instead of the usual notification.\n\n"
-            "Your keywords:\n"
-            f"{lines}\n\n"
-            "<code>/keywords add &lt;phrase&gt;</code>\n"
-            "<code>/keywords remove &lt;phrase&gt;</code>\n"
-            "<code>/keywords clear</code>",
+            _keywords_panel_html(labels),
+            reply_markup=_keywords_keyboard(labels),
             parse_mode=ParseMode.HTML,
         )
         return
@@ -539,14 +652,191 @@ async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
 
-    on = db.get_digest_enabled(uid)
     await update.message.reply_text(
-        f"Digest is <b>{'on' if on else 'off'}</b>.\n"
-        "Use <code>/digest on</code> or <code>/digest off</code>.\n"
-        f"When on, delivery is scheduled around {settings.digest_time_hour:02d}:"
-        f"{settings.digest_time_minute:02d} {html.escape(settings.digest_timezone)} (see .env).",
+        _digest_panel_html(uid, db, settings),
+        reply_markup=_digest_keyboard(),
         parse_mode=ParseMode.HTML,
     )
+
+
+async def callback_feed_actions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.message is None:
+        return
+    settings: Settings = context.application.bot_data["settings"]
+    db: Database = context.application.bot_data["db"]
+    uid = _register_user(db, settings, query.message.chat.id)
+    data = query.data or ""
+    m = re.match(r"^frm_(\d+)$", data)
+    if not m:
+        await query.answer()
+        return
+    idx = int(m.group(1))
+    urls = db.get_feed_urls(uid)
+    if idx < 0 or idx >= len(urls):
+        await query.answer(text="This list is outdated. Open /feeds again.", show_alert=True)
+        return
+    removed = urls[idx]
+    if not db.remove_feed(uid, removed):
+        await query.answer(text="Could not remove feed.", show_alert=True)
+        return
+    await query.answer(text="Removed.")
+    urls = db.get_feed_urls(uid)
+    text = _feeds_panel_html(urls)
+    kb = _feeds_keyboard(urls)
+    try:
+        await query.edit_message_text(
+            text=text,
+            reply_markup=kb,
+            parse_mode=ParseMode.HTML,
+        )
+    except BadRequest as e:
+        logger.warning("Feed list edit failed: %s", e)
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text=text,
+            reply_markup=kb,
+            parse_mode=ParseMode.HTML,
+        )
+
+
+async def callback_keyword_actions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.message is None:
+        return
+    settings: Settings = context.application.bot_data["settings"]
+    db: Database = context.application.bot_data["db"]
+    uid = _register_user(db, settings, query.message.chat.id)
+    data = query.data or ""
+    m = re.match(r"^kwm_(\d+)$", data)
+    if not m:
+        await query.answer()
+        return
+    idx = int(m.group(1))
+    labels = db.list_keyword_labels(uid)
+    if idx < 0 or idx >= len(labels):
+        await query.answer(text="This list is outdated. Open /keywords again.", show_alert=True)
+        return
+    if not db.remove_keyword(uid, labels[idx]):
+        await query.answer(text="Could not remove keyword.", show_alert=True)
+        return
+    await query.answer(text="Removed.")
+    labels = db.list_keyword_labels(uid)
+    text = _keywords_panel_html(labels)
+    kb = _keywords_keyboard(labels)
+    try:
+        await query.edit_message_text(
+            text=text,
+            reply_markup=kb,
+            parse_mode=ParseMode.HTML,
+        )
+    except BadRequest as e:
+        logger.warning("Keyword list edit failed: %s", e)
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text=text,
+            reply_markup=kb,
+            parse_mode=ParseMode.HTML,
+        )
+
+
+async def callback_digest_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.message is None:
+        return
+    settings: Settings = context.application.bot_data["settings"]
+    db: Database = context.application.bot_data["db"]
+    uid = _register_user(db, settings, query.message.chat.id)
+    data = query.data or ""
+    if data == "dig_on":
+        db.set_digest_enabled(uid, True)
+        await query.answer(text="Digest on.")
+    elif data == "dig_off":
+        db.set_digest_enabled(uid, False)
+        await query.answer(text="Digest off.")
+    else:
+        await query.answer()
+        return
+    text = _digest_panel_html(uid, db, settings)
+    try:
+        await query.edit_message_text(
+            text=text,
+            reply_markup=_digest_keyboard(),
+            parse_mode=ParseMode.HTML,
+        )
+    except BadRequest as e:
+        logger.warning("Digest panel edit failed: %s", e)
+
+
+async def callback_bot_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.message is None:
+        return
+    settings: Settings = context.application.bot_data["settings"]
+    db: Database = context.application.bot_data["db"]
+    catalog: ExploreCatalog = context.application.bot_data["explore_catalog"]
+    chat_id = query.message.chat.id
+    uid = _register_user(db, settings, chat_id)
+    data = query.data or ""
+
+    if data == "menu_help":
+        await query.answer()
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=_help_text(settings),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if data == "menu_feeds":
+        await query.answer()
+        urls = db.get_feed_urls(uid)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=_feeds_panel_html(urls),
+            reply_markup=_feeds_keyboard(urls),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if data == "menu_keywords":
+        await query.answer()
+        labels = db.list_keyword_labels(uid)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=_keywords_panel_html(labels),
+            reply_markup=_keywords_keyboard(labels),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if data == "menu_digest":
+        await query.answer()
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=_digest_panel_html(uid, db, settings),
+            reply_markup=_digest_keyboard(),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if data == "menu_explore":
+        if not catalog:
+            await query.answer(
+                text="Explore catalog not loaded on the server.",
+                show_alert=True,
+            )
+            return
+        await query.answer()
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="<b>Explore</b> — pick a category. Feeds are checked before they are added.",
+            reply_markup=_explore_categories_kb(catalog),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    await query.answer()
 
 
 async def _send_entry(
@@ -797,6 +1087,7 @@ def main() -> None:
     application.bot_data["explore_catalog"] = explore_catalog
 
     application.add_handler(CommandHandler("start", cmd_start))
+    application.add_handler(CommandHandler("help", cmd_help))
     application.add_handler(CommandHandler("feeds", cmd_feeds))
     application.add_handler(CommandHandler("explore", cmd_explore))
     application.add_handler(CommandHandler("addfeed", cmd_addfeed))
@@ -806,6 +1097,10 @@ def main() -> None:
     application.add_handler(CommandHandler("digest", cmd_digest))
     application.add_handler(CommandHandler("test", cmd_test))
     application.add_handler(CommandHandler("testdigest", cmd_testdigest))
+    application.add_handler(CallbackQueryHandler(callback_feed_actions, pattern=r"^frm_\d+$"))
+    application.add_handler(CallbackQueryHandler(callback_keyword_actions, pattern=r"^kwm_\d+$"))
+    application.add_handler(CallbackQueryHandler(callback_digest_menu, pattern=r"^dig_(on|off)$"))
+    application.add_handler(CallbackQueryHandler(callback_bot_menu, pattern=r"^menu_"))
     application.add_handler(CallbackQueryHandler(callback_explore, pattern=r"^exp_"))
 
     if application.job_queue is None:
