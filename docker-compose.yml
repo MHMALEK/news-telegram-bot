@@ -1,0 +1,13 @@
+services:
+  news-bot:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - bot_data:/data
+    environment:
+      # Persist SQLite across container restarts
+      DATABASE_PATH: /data/news_bot.db
+
+volumes:
+  bot_data:
