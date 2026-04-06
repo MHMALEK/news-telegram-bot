@@ -53,6 +53,52 @@ def published_timestamp(entry: dict[str, Any]) -> float:
     return 0.0
 
 
+def validate_feed_url(feed_url: str) -> tuple[bool, str | None, str | None]:
+    """
+    Check that ``feed_url`` returns a parseable RSS/Atom feed with something to read.
+
+    Returns ``(ok, error_message, channel_title)``.
+    """
+    try:
+        body = _fetch_feed_bytes(feed_url)
+    except Exception as e:
+        return False, f"Could not download: {e}", None
+
+    parsed = feedparser.parse(body)
+    entries = list(parsed.entries or [])
+    channel_title: str | None = None
+    if parsed.feed:
+        t = parsed.feed.get("title")
+        if t:
+            channel_title = str(t).strip() or None
+        if not channel_title:
+            link = parsed.feed.get("link")
+            if link:
+                channel_title = str(link).strip() or None
+
+    if not entries and not channel_title:
+        return (
+            False,
+            "Not a usable RSS or Atom feed (no channel and no entries).",
+            None,
+        )
+
+    return True, None, channel_title
+
+
+def sample_newest_entry(
+    feed_url: str,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """
+    Return ``(feed_title, entry)`` for the newest item, or ``(feed_title, None)`` if empty.
+    """
+    feed_title, entries = fetch_entries(feed_url)
+    if not entries:
+        return feed_title, None
+    newest = max(entries, key=lambda e: published_timestamp(e))
+    return feed_title, newest
+
+
 def fetch_entries(feed_url: str) -> tuple[str | None, list[dict[str, Any]]]:
     try:
         body = _fetch_feed_bytes(feed_url)

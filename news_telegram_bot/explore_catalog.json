@@ -1,0 +1,76 @@
+{
+  "category_order": [
+    "game",
+    "tech",
+    "film",
+    "news",
+    "biz",
+    "sci",
+    "sport"
+  ],
+  "categories": {
+    "game": {
+      "title": "Games & esports",
+      "feeds": [
+        {"title": "Polygon", "url": "https://www.polygon.com/rss/index.xml"},
+        {"title": "PC Gamer", "url": "https://www.pcgamer.com/rss/"},
+        {"title": "Eurogamer", "url": "https://www.eurogamer.net/feed/"},
+        {"title": "IGN Games", "url": "https://feeds.feedburner.com/ign/games-all"},
+        {"title": "Kotaku", "url": "https://kotaku.com/rss"}
+      ]
+    },
+    "tech": {
+      "title": "Tech",
+      "feeds": [
+        {"title": "The Verge", "url": "https://www.theverge.com/rss/index.xml"},
+        {"title": "Ars Technica", "url": "https://feeds.arstechnica.com/arstechnica/index"},
+        {"title": "Wired", "url": "https://www.wired.com/feed/rss"},
+        {"title": "TechCrunch", "url": "https://techcrunch.com/feed/"},
+        {"title": "The Next Web", "url": "https://thenextweb.com/feed"}
+      ]
+    },
+    "film": {
+      "title": "Film & TV",
+      "feeds": [
+        {"title": "Variety", "url": "https://variety.com/feed/"},
+        {"title": "The Hollywood Reporter", "url": "https://www.hollywoodreporter.com/feed/"},
+        {"title": "IndieWire", "url": "https://www.indiewire.com/feed/"},
+        {"title": "Deadline", "url": "https://deadline.com/feed/"}
+      ]
+    },
+    "news": {
+      "title": "World news",
+      "feeds": [
+        {"title": "BBC News", "url": "https://feeds.bbci.co.uk/news/rss.xml"},
+        {"title": "NPR News", "url": "https://feeds.npr.org/1001/rss.xml"},
+        {"title": "The Guardian (world)", "url": "https://www.theguardian.com/world/rss"},
+        {"title": "Al Jazeera English", "url": "https://www.aljazeera.com/xml/rss/all.xml"}
+      ]
+    },
+    "biz": {
+      "title": "Business",
+      "feeds": [
+        {"title": "CNBC Top News", "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html"},
+        {"title": "MarketWatch", "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories"},
+        {"title": "Bloomberg Markets", "url": "https://feeds.bloomberg.com/markets/news.rss"}
+      ]
+    },
+    "sci": {
+      "title": "Science",
+      "feeds": [
+        {"title": "Phys.org", "url": "https://phys.org/rss-feed/"},
+        {"title": "ScienceDaily", "url": "https://www.sciencedaily.com/rss/all.xml"},
+        {"title": "New Scientist", "url": "https://www.newscientist.com/feed/home"},
+        {"title": "NASA Breaking", "url": "https://www.nasa.gov/rss/dyn/breaking_news.rss"}
+      ]
+    },
+    "sport": {
+      "title": "Sports",
+      "feeds": [
+        {"title": "BBC Sport", "url": "https://feeds.bbci.co.uk/sport/rss.xml"},
+        {"title": "ESPN", "url": "https://www.espn.com/espn/rss/news"},
+        {"title": "CBS Sports", "url": "https://www.cbssports.com/rss/headlines/"}
+      ]
+    }
+  }
+}

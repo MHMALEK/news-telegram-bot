@@ -8,6 +8,7 @@ dependencies = [
     "feedparser>=6.0.11",
     "httpx>=0.27.0",
     "python-dotenv>=1.0.0",
+    "tzdata>=2024.1",
 ]
 
 [project.scripts]
@@ -19,3 +20,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["news_telegram_bot"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"news_telegram_bot/explore_catalog.json" = "news_telegram_bot/explore_catalog.json"

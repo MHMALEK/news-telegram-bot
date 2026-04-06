@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from zoneinfo import ZoneInfo
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,12 @@ class Settings:
     rss_notify_max_age_hours: float | None
     # If True, primary chat (TELEGRAM_CHAT_ID) subscriptions are replaced with RSS_FEED_URLS on startup.
     rss_sync_primary_feeds_from_env: bool
+    # When digest is enabled per-user (/digest on), send at this local time in this IANA timezone.
+    digest_timezone: str
+    digest_time_hour: int
+    digest_time_minute: int
+    # JSON file for /explore (categories and feeds). Override with EXPLORE_CATALOG_PATH.
+    explore_catalog_path: Path
 
 
 def _parse_feed_urls(raw: str) -> list[str]:
@@ -75,6 +82,38 @@ def load_settings() -> Settings:
         "RSS_SYNC_PRIMARY_FEEDS_FROM_ENV", ""
     ).strip().lower() in ("1", "true", "yes")
 
+    digest_timezone = os.environ.get(
+        "RSS_DIGEST_TIMEZONE", "Europe/Amsterdam"
+    ).strip()
+    try:
+        ZoneInfo(digest_timezone)
+    except Exception as e:
+        raise ValueError(
+            "Invalid RSS_DIGEST_TIMEZONE="
+            f"{digest_timezone!r} (use an IANA name, e.g. Europe/Amsterdam)"
+        ) from e
+
+    digest_time_raw = os.environ.get("RSS_DIGEST_TIME", "09:00").strip()
+    parts = digest_time_raw.replace(".", ":").split(":")
+    if len(parts) != 2:
+        raise ValueError("RSS_DIGEST_TIME must be HH:MM in 24h form, e.g. 09:00")
+    try:
+        digest_time_hour = int(parts[0])
+        digest_time_minute = int(parts[1])
+    except ValueError as e:
+        raise ValueError("RSS_DIGEST_TIME must use integer hour and minute") from e
+    if not (0 <= digest_time_hour <= 23 and 0 <= digest_time_minute <= 59):
+        raise ValueError("RSS_DIGEST_TIME: hour must be 0-23, minute 0-59")
+
+    _pkg = Path(__file__).resolve().parent
+    _default_explore = _pkg / "explore_catalog.json"
+    explore_raw = os.environ.get("EXPLORE_CATALOG_PATH", "").strip()
+    explore_catalog_path = (
+        Path(explore_raw).expanduser().resolve()
+        if explore_raw
+        else _default_explore.resolve()
+    )
+
     return Settings(
         bot_token=token,
         chat_id=chat_id,
@@ -86,4 +125,8 @@ def load_settings() -> Settings:
         rss_bootstrap_count=bootstrap,
         rss_notify_max_age_hours=rss_notify_max_age_hours,
         rss_sync_primary_feeds_from_env=rss_sync_primary_feeds_from_env,
+        digest_timezone=digest_timezone,
+        digest_time_hour=digest_time_hour,
+        digest_time_minute=digest_time_minute,
+        explore_catalog_path=explore_catalog_path,
     )

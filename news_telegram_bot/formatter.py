@@ -36,6 +36,28 @@ def entry_id(entry: dict[str, Any]) -> str:
     return _as_text(entry.get("title"))
 
 
+def entry_match_text(entry: dict[str, Any]) -> str:
+    """
+    Lowercase plain text from title, summary, and category/tag terms for keyword matching.
+    """
+    parts: list[str] = []
+    title = entry.get("title")
+    if title:
+        parts.append(strip_html(str(title)))
+    for key in ("summary", "description", "subtitle"):
+        raw = entry.get(key)
+        if raw:
+            parts.append(strip_html(str(raw)))
+    tags = entry.get("tags")
+    if isinstance(tags, list):
+        for t in tags:
+            if isinstance(t, dict):
+                term = t.get("term")
+                if term:
+                    parts.append(strip_html(str(term)))
+    return " ".join(parts).lower()
+
+
 def brief_from_entry(entry: dict[str, Any], max_len: int) -> str:
     for key in ("summary", "description", "subtitle"):
         raw = entry.get(key)
@@ -75,3 +97,84 @@ def format_message(
         lines.append(f"<i>{' · '.join(meta_parts)}</i>")
 
     return "\n\n".join(lines)
+
+
+def format_keyword_alert(
+    entry: dict[str, Any],
+    *,
+    feed_title: str | None,
+    brief_max_length: int,
+    matched_labels: list[str],
+) -> str:
+    """Same body as ``format_message`` with a distinct keyword alert header."""
+    labels = ", ".join(html.escape(l, quote=False) for l in matched_labels)
+    header = f"🔔 <b>Keyword alert</b> — <b>{labels}</b>"
+    body = format_message(
+        entry,
+        feed_title=feed_title,
+        brief_max_length=brief_max_length,
+    )
+    return f"{header}\n\n{body}"
+
+
+# Telegram hard limit; keep margin for HTML expansion.
+_DIGEST_CHUNK_SAFE = 3800
+
+
+def format_digest_messages(
+    items: list[tuple[str | None, dict[str, Any], str, list[str] | None]],
+    *,
+    brief_max_length: int,
+) -> list[str]:
+    """
+    Build one or more HTML messages for a daily digest.
+    ``items`` are (feed_title, entry, stable_id, keyword_labels_or_none).
+    """
+    if not items:
+        return []
+
+    brief = min(brief_max_length, 280)
+    blocks: list[str] = []
+    for feed_title, entry, _eid, kw in items:
+        if kw:
+            blocks.append(
+                format_keyword_alert(
+                    entry,
+                    feed_title=feed_title,
+                    brief_max_length=brief,
+                    matched_labels=kw,
+                )
+            )
+        else:
+            blocks.append(
+                format_message(
+                    entry,
+                    feed_title=feed_title,
+                    brief_max_length=brief,
+                )
+            )
+
+    header = "<b>Daily digest</b>\n\n"
+    sep = "\n\n──────────\n\n"
+    chunks: list[str] = []
+    parts: list[str] = []
+    for block in blocks:
+        trial = header + sep.join(parts + [block])
+        if len(trial) <= _DIGEST_CHUNK_SAFE:
+            parts.append(block)
+            continue
+        if parts:
+            chunks.append(header + sep.join(parts))
+            parts = [block]
+            if len(header + block) > _DIGEST_CHUNK_SAFE:
+                chunks.append(
+                    header + block[: _DIGEST_CHUNK_SAFE - len(header) - 24] + "…"
+                )
+                parts = []
+        else:
+            chunks.append(
+                header + block[: _DIGEST_CHUNK_SAFE - len(header) - 24] + "…"
+            )
+    if parts:
+        chunks.append(header + sep.join(parts))
+    return chunks
